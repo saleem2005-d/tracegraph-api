@@ -5,8 +5,8 @@ import {
   MapPin, 
   Lock, 
   RefreshCw, 
-  TrendingUp,
-  Cpu
+  TrendingUp, 
+  Cpu 
 } from 'lucide-react';
 
 interface SimNode {
@@ -79,7 +79,6 @@ export default function App() {
     setCountdown(702);
 
     try {
-      // Safe non-blocking fetch with 1.2s timeout
       const endpoints = [
         'https://kavach-api-7198.onrender.com/api/v1/incident/process-fir',
         'http://127.0.0.1:8000/api/v1/incident/process-fir'
