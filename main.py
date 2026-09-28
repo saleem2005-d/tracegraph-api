@@ -1,90 +1,180 @@
-﻿from fastapi import FastAPI
+import os
+import time
+import hashlib
+import json
+import uvicorn
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from typing import Optional
 
-app = FastAPI(
-    title="PROJECT KAVACH-GRAPH API",
-    version="3.0.0",
-    description="Autonomous Mule Layering Forensics & Cash-Out Interception Engine (SIH26184)"
-)
+app = FastAPI(title="TraceGraph Sovereign Engine API", version="3.2.0")
 
+# Broad CORS configuration for Vercel production and local testing
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
-SIM_DATA = {
-    "fir_id": "1930-CFCFRMS-2026-88129",
-    "golden_window_remaining_minutes": 11.42,
-    "stolen_amount": 500000.0,
-    "nodes": [
-        {"id": "V1", "label": "Victim: 8823-XXXX-1029", "type": "victim", "layer": 0, "balance": 0, "bank": "SBI", "status": "debited", "lat": 14.6850, "lng": 77.5980},
-        {"id": "M1", "label": "Mule L1: 4410-XXXX-9912", "type": "mule", "layer": 1, "balance": 0, "bank": "HDFC", "status": "forwarded", "lat": 14.6830, "lng": 77.6010},
-        {"id": "M2", "label": "Mule L2: 1290-XXXX-4531", "type": "mule", "layer": 2, "balance": 0, "bank": "ICICI", "status": "forwarded", "lat": 14.6800, "lng": 77.6030},
-        {"id": "M3", "label": "Mule L2: 8871-XXXX-0092", "type": "mule", "layer": 2, "balance": 150000.0, "bank": "Axis Bank", "status": "held", "lat": 14.6750, "lng": 77.5920},
-        {"id": "M4", "label": "Mule L3: 3319-XXXX-6712", "type": "mule", "layer": 3, "balance": 0, "bank": "Kotak Mahindra", "status": "in_transit", "lat": 14.6810, "lng": 77.6000},
-        {"id": "ATM_TARGET", "label": "TARGET ATM #KA-8819", "type": "atm", "layer": 4, "balance": 350000.0, "bank": "SBI ATM", "status": "intercept_target", "lat": 14.6819, "lng": 77.6006}
-    ],
-    "edges": [
-        {"source": "V1", "target": "M1", "amount": 500000.0, "latency_seconds": 12, "timestamp": "19:10:02"},
-        {"source": "M1", "target": "M2", "amount": 350000.0, "latency_seconds": 24, "timestamp": "19:10:26"},
-        {"source": "M1", "target": "M3", "amount": 150000.0, "latency_seconds": 18, "timestamp": "19:10:20"},
-        {"source": "M2", "target": "M4", "amount": 350000.0, "latency_seconds": 32, "timestamp": "19:10:58"},
-        {"source": "M4", "target": "ATM_TARGET", "amount": 350000.0, "latency_seconds": 45, "timestamp": "19:11:43"}
-    ],
-    "target_atm_prediction": {
-        "terminal_id": "ATM-ANANTAPUR-01",
-        "location_name": "Clock Tower SBI ATM Terminal, Anantapur",
-        "latitude": 14.6819,
-        "longitude": 77.6006,
-        "confidence_score": 0.884,
-        "recommended_pcr_van_id": "AP-PCR-09 (1.4 km)",
-        "estimated_pcr_eta_minutes": 3.8
-    },
-    "atms": [
-        {"id": "ATM-1", "name": "Clock Tower SBI ATM", "lat": 14.6819, "lng": 77.6006, "prob": 0.884, "status": "target", "liquidity": 350000, "address": "Clock Tower Road, Anantapur"},
-        {"id": "ATM-2", "name": "Subhash Road HDFC ATM", "lat": 14.6860, "lng": 77.6040, "prob": 0.082, "status": "safe", "liquidity": 120000, "address": "Subhash Road, Near ALTS"},
-        {"id": "ATM-3", "name": "RTC Bus Stand ICICI ATM", "lat": 14.6780, "lng": 77.5950, "prob": 0.034, "status": "safe", "liquidity": 80000, "address": "Central Bus Station Road"}
-    ],
-    "gemini_police_dispatch_alert": {
-        "alert_id": "I4C-MHA-2026-9810A",
-        "statutory_mandate": "Section 91 & Section 102 CrPC Precautionary Digital Seizure Order",
-        "risk_level": "CRITICAL_GOLDEN_HOUR",
-        "urgency_action": "Route PCR Van AP-PCR-09 to Clock Tower ATM. Pre-freeze hold on Kotak Bank Switch.",
-        "ai_rationale": "High velocity layering pattern (5 hops in 121s) indicates active cash extraction attempt."
-    }
-}
+@app.middleware("http")
+async def cors_preflight_override(request: Request, call_next):
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        return response
 
-FREEZE_RESP = {
-    "status": "SUCCESS_ACCOUNT_FROZEN",
-    "account_id": "3319-XXXX-6712",
-    "bank_name": "Kotak Mahindra Bank",
-    "amount_secured": 350000.0,
-    "legal_reference": "Sec 91 CrPC Mandate under FIR 1930-CFCFRMS-2026-88129",
-    "switch_ack_latency_ms": 13.8
-}
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal Engine Error: {str(exc)}"}
+        )
+
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 @app.get("/")
-def root():
-    return {"status": "online", "service": "KAVACH-GRAPH", "ps_id": "SIH26184"}
+@app.get("/health")
+def health():
+    return {
+        "status": "HEALTHY",
+        "service": "TraceGraph Sovereign Engine",
+        "version": "v3.2.0"
+    }
 
-@app.all("/api/v1/incident/process-fir")
-@app.all("/api/simulate")
-@app.all("/api/v1/atms/predict-cashout")
-def get_simulation():
-    return SIM_DATA
+class TraceIncidentRequest(BaseModel):
+    victim_identifier: Optional[str] = "VICTIM-9988776655"
+    defrauded_amount: float = Field(..., gt=0)
+    utr_reference: str
+    source_bank_acc: str
 
-@app.all("/api/v1/atms/heat-matrix")
-def get_heat_matrix():
-    return {"status": "success", "hotspots": SIM_DATA["atms"]}
+@app.post("/api/v1/forensics/trace-incident")
+async def trace_incident(payload: TraceIncidentRequest):
+    siphoned = float(payload.defrauded_amount)
+    
+    mock_nodes = [
+        {
+            "id": payload.source_bank_acc,
+            "name": f"Victim Account ({payload.victim_identifier})",
+            "bank": "State Bank of India",
+            "type": "ORIGIN_VICTIM",
+            "layer": 0,
+            "status": "DEPLETED",
+            "balance": 12500.0,
+            "allocated_lien": 0.0,
+            "risk_score": 0.02
+        },
+        {
+            "id": "MULE-L1-CANARA-991",
+            "name": "Alok Traders (Primary Mule L1)",
+            "bank": "Canara Bank",
+            "type": "LAYER_1_MULE",
+            "layer": 1,
+            "status": f"LIEN_INR_{int(siphoned)}",
+            "balance": siphoned,
+            "allocated_lien": siphoned,
+            "risk_score": 0.96
+        },
+        {
+            "id": "MULE-L2-PAYTM-402",
+            "name": "FastPay Reseller (Mule L2)",
+            "bank": "Paytm Payments Bank",
+            "layer": 2,
+            "status": f"LIEN_INR_{int(siphoned * 0.54)}",
+            "balance": round(siphoned * 0.54, 2),
+            "allocated_lien": round(siphoned * 0.54, 2),
+            "risk_score": 0.89
+        },
+        {
+            "id": "MULE-L2-ICICI-118",
+            "name": "Vortex Logistics Prop. (Mule L2)",
+            "bank": "ICICI Bank",
+            "layer": 2,
+            "status": f"LIEN_INR_{int(siphoned * 0.46)}",
+            "balance": round(siphoned * 0.46, 2),
+            "allocated_lien": round(siphoned * 0.46, 2),
+            "risk_score": 0.84
+        },
+        {
+            "id": "ATM-ROHINI-SEC18",
+            "name": "Terminal Cash-Out (Rohini Sector-18)",
+            "bank": "National Switch Terminal",
+            "type": "TERMINAL_CASH_OUT",
+            "layer": 3,
+            "status": "FIELD_DISPATCH_NOTIFIED",
+            "balance": 0.0,
+            "allocated_lien": 0.0,
+            "risk_score": 0.99
+        }
+    ]
 
-@app.all("/api/v1/incident/freeze")
-@app.all("/api/freeze")
-def execute_freeze():
-    return FREEZE_RESP
+    mock_hops = [
+        {
+            "utr": payload.utr_reference,
+            "from": payload.source_bank_acc,
+            "to": "MULE-L1-CANARA-991",
+            "amount": siphoned,
+            "channel": "IMPS/FAST",
+            "timestamp": int(time.time() - 3600)
+        },
+        {
+            "utr": "UPI/2026/891022/PAYTM",
+            "from": "MULE-L1-CANARA-991",
+            "to": "MULE-L2-PAYTM-402",
+            "amount": round(siphoned * 0.54, 2),
+            "channel": "UPI/SMURF",
+            "timestamp": int(time.time() - 3200)
+        },
+        {
+            "utr": "RTGS/2026/891023/ICIC",
+            "from": "MULE-L1-CANARA-991",
+            "to": "MULE-L2-ICICI-118",
+            "amount": round(siphoned * 0.46, 2),
+            "channel": "RTGS/SPLIT",
+            "timestamp": int(time.time() - 2800)
+        },
+        {
+            "utr": "ATM/ROHINI/99201",
+            "from": "MULE-L2-PAYTM-402",
+            "to": "ATM-ROHINI-SEC18",
+            "amount": round(siphoned * 0.54, 2),
+            "channel": "CARDLESS_ATM_EXIT",
+            "timestamp": int(time.time() - 2100)
+        }
+    ]
+
+    hasher = hashlib.sha256()
+    hasher.update(json.dumps({"case": payload.utr_reference, "volume": siphoned}).encode())
+
+    return {
+        "case_id": f"CFCFRMS-1930-{payload.utr_reference[-6:]}",
+        "victim_account": payload.source_bank_acc,
+        "siphoned_volume": siphoned,
+        "lienable_volume": round(siphoned * 0.884, 2),
+        "traversal_time_ms": 6.4,
+        "sec_65b_digest": f"SHA256:{hasher.hexdigest()}",
+        "nodes": mock_nodes,
+        "hops": mock_hops
+    }
+
+@app.post("/api/v1/forensics/upload-statement")
+async def upload_bank_statement():
+    return {
+        "records_parsed": 18,
+        "message": "Annexure processed successfully. Multi-hop ledger synthesized.",
+        "siphoned_identified": 850000.0
+    }
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
